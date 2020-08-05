@@ -1,0 +1,41 @@
+provider:
+  aws:
+    profile_name: ebdev
+    secret_key: null
+    access_key: null
+  gcp:
+    acc: null
+    
+
+project:
+  name: rxtb-test
+  sync:
+    exclude:
+      - .git/*
+      - __*__.py
+    include:
+      - ec2.py
+
+instance:
+  - name: gpu-iptc
+    provider: aws
+    config: 
+      region: eu-west-1a
+      type: m5.large
+      keyname: jesper_ssh
+      ami: ami-0d30ddc9d3cc48bac
+      spot: true
+      volumes:
+        - devname: /dev/xvda
+          size: 50
+  - name: test-iptc
+    provider: aws
+    config: 
+      region: eu-west-1a
+      type: m5.xlarge
+      keyname: jesper_ssh
+      ami: ami-0d30ddc9d3cc48bac
+      spot: true
+      volumes:
+        - devname: /dev/xvda
+          size: 50

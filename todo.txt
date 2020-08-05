@@ -1,0 +1,5 @@
+TODO:
+[ ] ability to SSH to the instance
+[ ] run a script on the instance
+[ ] sync local dir or specified dir to the instance
+[ ] use Docker image to run in
