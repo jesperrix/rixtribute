@@ -2,6 +2,13 @@ import os
 import copy
 import yaml
 import sys
+from enum import Enum
+
+class ProviderType(Enum):
+    AWS = 'aws'
+    GCP = 'gcp'
+    # AZURE = 'azure'
+
 
 class ProfileParser():
 
@@ -65,14 +72,33 @@ class ConfigParser(object):
         # find config .rxtb-config.yaml
         self._raw_config = self.find_and_parse_config()
 
+        self.config_dir_absolute = None
+
+        # TODO parse required fields
         # parse provider(s)
         # parse project
         # parse instance
 
-    def get_project_sync(self):
-        if 'project' not in self._raw_config:
-            raise Exception("No project section in rxtb-config.yaml")
+    def verify_config(self):
+        self.get_instances()
 
+    def find_and_parse_config(self):
+        config = None
+        locations = []
+        for loc in os.curdir, os.path.expanduser("~"), os.environ.get("RIXTRIBUTE_CONF", None):
+            if loc is None: continue
+            locations.append(loc)
+            try:
+                config_path = os.path.join(loc, "rxtb-config.yaml")
+                with open(config_path, 'rb') as f:
+                    self.config_dir_absolute = os.path.dirname(os.path.abspath(config_path))
+                    return yaml.load(f, Loader=yaml.FullLoader)
+            except IOError:
+                pass
+
+        raise Exception(f"No rxtb-config.yaml found in: {locations}")
+
+    # Provider section
 
     def get_provider(self, provider :str):
         if 'provider' not in self._raw_config:
@@ -81,6 +107,34 @@ class ConfigParser(object):
             return copy.deepcopy(self._raw_config['provider'][provider])
         except KeyError as e:
             raise Exception("No provider called '{provider}', add to the provider section.")
+
+    # Project section
+
+    def get_project_sync(self):
+        if 'project' not in self._raw_config:
+            raise Exception("No project section in rxtb-config.yaml")
+
+    def get_project(self):
+        if 'project' not in self._raw_config:
+            raise Exception("No project section in rxtb-config.yaml")
+        return copy.deepcopy(self._raw_config['project'])
+
+    # container section
+
+    def get_containers(self):
+        if 'container' not in self._raw_config:
+            raise Exception("No container section in rxtb-config.yaml")
+        return copy.deepcopy(self._raw_config['container'])
+
+    def get_container(self, container_name :str):
+        containers = self.get_containers()
+        for container in containers:
+            if container['name'] == container_name:
+                return copy.deepcopy(container)
+
+        raise Exception(f"No container called '{container_name}', add to the container section")
+
+    # instance section
 
     def get_instances(self):
         return copy.deepcopy(self._raw_config["instance"])
@@ -95,19 +149,9 @@ class ConfigParser(object):
 
         raise Exception(f"No instance called '{instance_name}', add to the instance section")
 
-    def find_and_parse_config(self):
-        config = None
-        locations = []
-        for loc in os.curdir, os.path.expanduser("~"), os.environ.get("RIXTRIBUTE_CONF", None):
-            if loc is None: continue
-            locations.append(loc)
-            try:
-                with open(os.path.join(loc, "rxtb-config.yaml"), 'rb') as f:
-                    return yaml.load(f, Loader=yaml.FullLoader)
-            except IOError:
-                pass
-
-        raise Exception(f"No rxtb-config.yaml found in: {locations}")
-
-config = ConfigParser()
-profile = ProfileParser()
+try:
+    config = ConfigParser()
+    profile = ProfileParser()
+except Exception as e:
+    print(f"Error: {e}")
+    sys.exit(1)

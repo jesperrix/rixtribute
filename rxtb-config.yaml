@@ -14,14 +14,21 @@ project:
       - .git/*
       - __*__.py
     include:
-      - ec2.py
+      - rixtribute/example-gpu.DockerFile
+      - rixtribute/example-gpu.DockerFile
+
+container:
+  - name: pytorch-training
+    file: rixtribute/example-gpu.DockerFile
+    ports: [5000]
 
 instance:
   - name: gpu-iptc
     provider: aws
+    container: pytorch-training
     config: 
       region: eu-west-1a
-      type: m5.large
+      type: p3.2xlarge
       keyname: jesper_ssh
       ami: ami-0d30ddc9d3cc48bac
       spot: true
@@ -32,7 +39,7 @@ instance:
     provider: aws
     config: 
       region: eu-west-1a
-      type: m5.xlarge
+      type: m5.large
       keyname: jesper_ssh
       ami: ami-0d30ddc9d3cc48bac
       spot: true
