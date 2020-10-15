@@ -4,3 +4,4 @@ paramiko
 click
 tabulate
 pyyaml
+docker

@@ -48,6 +48,6 @@ setup(
     python_requires=">=3.6",
 
     entry_points = {
-        "console_scripts": ['rxtb = rixtribute.main:main']
+        "console_scripts": ['rxtb = rixtribute.cli:main']
     }
 )
