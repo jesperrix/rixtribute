@@ -1,7 +1,8 @@
 from rixtribute.helper import get_boto_session, generate_tags
 from rixtribute.configuration import config
 from rixtribute import aws_helper
-from typing import List
+from typing import List, Optional
+import base64
 
 class ECRRepo(object):
     def __init__(self, boto_instance_dict :dict):
@@ -60,7 +61,7 @@ class ECRRepo(object):
 
 class ECR(object):
 
-    def __init__(self, boto_object):
+    def __init__(self):
         """ STATIC class used as API """
         pass
 
@@ -76,9 +77,21 @@ class ECR(object):
         return client
 
     @classmethod
-    def list_repositories(cls, filter_project_name :str=None):
+    def get_repository(cls, repository_name :str=None, region_name :str=None) -> Optional[ECRRepo]:
         """List repositories"""
-        ecr = cls._get_ecr_boto_client()
+        ecr = cls._get_ecr_boto_client(region_name=region_name)
+        response = ecr.describe_repositories(repositoryNames=[repository_name])
+
+        assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
+
+        for repo in response["repositories"]:
+            return ECRRepo(repo)
+        return None
+
+    @classmethod
+    def list_repositories(cls, filter_project_name :str=None, region_name :str=None):
+        """List repositories"""
+        ecr = cls._get_ecr_boto_client(region_name=region_name)
         response = ecr.describe_repositories()
 
 
@@ -97,9 +110,9 @@ class ECR(object):
         return repositories
 
     @classmethod
-    def create_repository(cls, name :str):
+    def create_repository(cls, name :str, region_name :str=None):
         """Create a ECR repository"""
-        client = cls._get_ecr_boto_client()
+        client = cls._get_ecr_boto_client(region_name=region_name)
         response = client.create_repository(
             repositoryName=name,
             tags=generate_tags(name)
@@ -109,9 +122,9 @@ class ECR(object):
         return ECRRepo(response['repository'])
 
     @classmethod
-    def delete_repository(cls, name :str, registry_id :str, force :bool=False):
+    def delete_repository(cls, name :str, registry_id :str, force :bool=False, region_name :str=None):
         """Create a ECR repository"""
-        client = cls._get_ecr_boto_client()
+        client = cls._get_ecr_boto_client(region_name=region_name)
         response = client.delete_repository(
             registryId=registry_id,
             repositoryName=name,
@@ -119,3 +132,31 @@ class ECR(object):
         )
 
         assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
+
+    @classmethod
+    def get_auth_token(cls, region_name :str=None) -> dict:
+        """ get auth_config for logging into docker
+        Args:
+            None
+        Returns:
+            dict : {'username': username,
+                    'password': password,
+                    'registry': registry}
+                    docker_client.login(**get_auth_token())
+        Raises:
+            None
+        """
+        client = cls._get_ecr_boto_client(region_name=region_name)
+        response = client.get_authorization_token()
+
+        assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
+
+        registry = response['authorizationData'][0]['proxyEndpoint']
+        auth_token = response['authorizationData'][0]['authorizationToken']
+        auth_token = base64.b64decode(auth_token).decode()
+
+        username, password = auth_token.split(':')
+
+        return {'username': username,
+                'password': password,
+                'registry': registry}

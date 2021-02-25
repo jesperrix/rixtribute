@@ -21,3 +21,17 @@ Choose instance to start: 1
 ```
 
 Then select 
+
+# TODO:
+[x] Create security group
+[x] Create key-pair
+  [x] add key to rxtb-profile
+  [ ] add user name prefix to key name to avoid duplicates on multi person work setup
+
+[ ] Run command remotely inside docker container
+[ ] Start/stop instance for improved startup times
+[ ] Start normal instance (non-spot)
+## Config parsing
+[ ] parse project like provider, instance and container
+[ ] if no rxtb file in current dir traverse until .git dir
+

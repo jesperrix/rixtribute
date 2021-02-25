@@ -1,4 +1,5 @@
 import sys
+import string
 
 region_name_to_code_dict = {'us-east-2': 'US East (Ohio)',
                        'us-east-1': 'US East (N. Virginia)',
@@ -37,3 +38,7 @@ def region_code_to_region_name(region_code :str) -> str:
     except KeyError as e:
         print("Error: No such region {region_code}")
         sys.exit(1)
+
+def strip_to_region(s :str):
+    """ strips availability zone from region e.g. eu-west-1a -> eu-west-1 """
+    return s.rstrip(string.ascii_letters)

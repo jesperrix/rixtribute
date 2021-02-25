@@ -3,8 +3,11 @@ import click
 import pandas as pd
 from tabulate import tabulate
 import docker
+from typing import Optional
 
 from rixtribute.configuration import config, profile
+from rixtribute.helper import filter_list_of_dicts
+from rixtribute import container_utils
 # from rixtribute.ec2 import EC2, EC2Instance
 from rixtribute.ecr import ECR
 
@@ -42,32 +45,37 @@ def create(ctx, name):
     """ Create an ECR repository """
     ECR.create_repository(name)
 
-@ecr.command()
+
+@ecr.command(help="push docker container")
 @click.pass_context
 def push(ctx):
-    """ Push image to ECR repository """
-    client = ECR._get_ecr_boto_client()
-    response = client.get_authorization_token()
-    token = response['authorizationData'][0]['authorizationToken']
-    import base64
-    # __import__('pdb').set_trace()
-    token = base64.b64decode(token).decode()
-    username, password = token.split(':')
-    auth_config = {'username': username, 'password': password}
+    cfg_containers = config.get_containers()
+    cfg_containers = filter_list_of_dicts(cfg_containers, ['name', 'tag', 'file'])
 
-    docker_client = docker.from_env()
-    image = docker_client.images.get("example-gpu:latest")
-    image.tag("293331033030.dkr.ecr.eu-west-1.amazonaws.com/test-iptc", "latest")
+    print("push image to ecr:")
+    print(tabulate(pd.DataFrame(cfg_containers), headers='keys'))
+    n = int(click.prompt("Choose image"))
 
-    # image = docker_client..get("example-gpu:latest")
-    # image.
-    print("Pushing...")
-    for line in \
-        docker_client.images.push("293331033030.dkr.ecr.eu-west-1.amazonaws.com/test-iptc:latest",
-                                  stream=True,
-                                  auth_config=auth_config):
-            print(line)
+    container_cfg = cfg_containers[n]
 
-    # repos = ECR.list_repositories()
-    # print(tabulate(pd.DataFrame([repo.get_printable_dict() for repo in repos]), headers='keys'))
-    # __import__('pdb').set_trace()
+    # Get built images from docker
+    images = container_utils.docker_images()
+
+    docker_image = container_utils.docker_image_get(f"{container_cfg['tag']}:latest")
+
+    if docker_image is None:
+        print("image not built, run: rxtb container build")
+        sys.exit()
+
+    # n = int(click.prompt("Choose container to build"))
+    repos = ECR.list_repositories(filter_project_name=config.project_name)
+
+    auth_config = ECR.get_auth_token()
+    container_utils.docker_login(auth_config)
+
+    for repo in repos:
+        if repo.repository_name == container_cfg['tag']:
+            # image = docker_client.images.get("example-gpu:latest")
+            print(f"Pushing image to {repo.repository_uri}")
+            docker_image.tag(repo.repository_uri, 'latest')
+            container_utils.docker_push(repo.repository_uri, 'latest', auth_config)

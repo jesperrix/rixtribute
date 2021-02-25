@@ -5,8 +5,10 @@ import pandas as pd
 from tabulate import tabulate
 import glob
 
+from rixtribute import container_utils
 from rixtribute.configuration import config, profile
 from rixtribute.ec2 import EC2, EC2Instance
+from rixtribute.ecr import ECR
 
 @click.group(short_help="ec2 server commands", invoke_without_command=True)
 @click.pass_context
@@ -51,22 +53,36 @@ def start(ctx):
     # Docker container
     docker_container_name = instance_cfg.get('container', None)
     if docker_container_name is not None:
-        docker_cfg = config.get_container(docker_container_name)
+        container_cfg = config.get_container(docker_container_name)
         print("Instance has a docker container")
 
-        # BUILD docker?
-        #
-        # Create ECR repo ?
-        #
-        # Push docker
-        print(docker_cfg)
+        # BUILD docker image
+        container_utils.docker_build_from_cfg(container_cfg)
 
-    print(instance_cfg)
-    sys.exit()
+        # Get or Create repo
+        repo = ECR.get_repository(container_cfg['tag'])
+        if repo is None:
+            repo = ECR.create_repository(container_cfg['tag'])
+
+        # Get docker image
+        docker_image = container_utils.docker_image_get(f"{container_cfg['tag']}:latest")
+        if docker_image is None:
+            print("image not built, run: rxtb container build")
+            sys.exit()
+
+        # Login to docker
+        auth_config = ECR.get_auth_token()
+
+        # Tag image, then push it
+        docker_image.tag(repo.repository_uri, 'latest')
+        container_utils.docker_push(repo.repository_uri, 'latest', auth_config)
 
     if instance_cfg['provider'] == "aws":
         if instance_cfg['config']["spot"] is True:
             EC2.create_spot_instance(instance_cfg)
+        else:
+            # TODO START NON-SPOT INSTANCE
+            pass
 
 @ec2.command(short_help="Stop a running instance")
 @click.pass_context
@@ -322,3 +338,14 @@ def list_files(ctx):
     # TODO:
     # PULL docker image
     # docker pull aws_account_id.dkr.ecr.us-west-2.amazonaws.com/amazonlinux:latest
+
+@ec2.command(help="Run command")
+@click.pass_context
+def cmd(ctx):
+    ec2_instances = EC2.list_instances(profile, all)
+    print(tabulate(pd.DataFrame([instance.get_printable_dict() for instance in ec2_instances]), headers='keys'))
+
+    n = int(click.prompt("Choose server to copy from"))
+    print(n)
+    # ec2_instance = ec2_instances[n]
+    # ec2_instance.list_files()

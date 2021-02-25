@@ -1,6 +1,7 @@
 import os
 import subprocess
 from typing import List, Optional
+import tempfile
 
 def generate_scp_command(source_files :List[str],
                          destination :str,
@@ -160,13 +161,17 @@ def scp(source :List[str],
     return True
 
 
-    # subprocess.call(cmd)
-
-def ssh(host :str, user :str, port :int=22, key :str=None):
-    command = generate_ssh_command(host=host, user=user, command=None, port=port, key_path=key)
+def ssh(host :str, user :str, port :int=22, key_path :str=None, key_str :str=None):
     print(f"SSHing into: {host}")
-    # WORKING FOR INITIAL CONNECT
+    if key_str != None:
+        f = tempfile.NamedTemporaryFile(suffix='_temp', prefix='rxtb_', delete=True)
+        f.write(key_str.encode("utf8"))
+        f.flush()
+        key_path = f.name
+
+    command = generate_ssh_command(host=host, user=user, command=None, port=port, key_path=key_path)
     ssh = subprocess.Popen(' '.join(command), shell=True, env=os.environ)
+    # WORKING FOR INITIAL CONNECT
     ssh.wait()
 
 

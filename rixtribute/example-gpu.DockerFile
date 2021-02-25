@@ -1,11 +1,13 @@
-FROM nvidia/cuda:10.2-runtime-ubuntu18.04
+FROM nvidia/cuda:11.2.1-base-ubuntu20.04
 SHELL ["/bin/bash", "-c"]
 
-RUN mkdir /workdir
-RUN apt-get -y update
-RUN apt-get -y install python3-pip
-
+#RUN mkdir /workdir
 COPY requirements.txt /workdir/requirements.txt
+
+RUN apt-get -y update && \
+    apt-get -y install python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN pip3 install torch torchvision
 RUN pip3 install -r /workdir/requirements.txt
 

@@ -1,5 +1,32 @@
+Overall objective:
+  1. Run long running process on EC2
+  2. run command on server and recieve output locally
+  3. Set into production: 
+    1. run periodically
+    2. run permanently (server)
+
+# INVESTEGATE
+EC2.cancel_spot_instance_request(self.spot_request_id)
+ Does cancel_spot_instance_request terminate or stop instance - 
+  Answer == NO!
+
+# TODO: 
+Support usage from automation, example copy files from script
+  - scp
+  - commands.ec2.copy_to
+  - commands.ec2.copy_from
+
 TODO:
-[ ] ability to SSH to the instance
+[x] ability to SSH to the instance
+[x] run a docker container on the EC2 container
+[x] start ec2
+[x] Parse docker config
+[ ] START command: auto fetch docker image, run command inside it
+  [ ] Parse docker config
+  [ ] verify instance container exists in docker-container section
+  [ ] fetch docker image using userdata?
+[ ] In config: verify required config
 [ ] run a script on the instance
+[ ] run a script on the instance inside docker
 [ ] sync local dir or specified dir to the instance
 [ ] use Docker image to run in

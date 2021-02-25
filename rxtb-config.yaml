@@ -3,8 +3,6 @@ provider:
     profile_name: ebdev
     secret_key: null
     access_key: null
-  gcp:
-    acc: null
     
 
 project:
@@ -30,8 +28,9 @@ instance:
       region: eu-west-1a
       type: p3.2xlarge
       keyname: jesper_ssh
-      ami: ami-0d30ddc9d3cc48bac
+      ami: ami-0e032abfb10b0b80a
       spot: true
+      ports: ["tcp:22"]
       volumes:
         - devname: /dev/xvda
           size: 50
@@ -41,8 +40,8 @@ instance:
       region: eu-west-1a
       type: m5.large
       keyname: jesper_ssh
-      ami: ami-0d30ddc9d3cc48bac
+      ami: ami-0e032abfb10b0b80a
       spot: true
       volumes:
         - devname: /dev/xvda
-          size: 50
+          size: 100

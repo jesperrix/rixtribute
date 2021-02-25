@@ -1,15 +1,21 @@
 import datetime
-from rixtribute.helper import get_boto_session, generate_tags
+import copy
+import boto3
+import botocore
+from rixtribute.helper import get_boto_session, generate_tags, get_external_ip
 from rixtribute import aws_helper
 import base64
 import os
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from rixtribute import ssh
+from rixtribute.configuration import config
+from rixtribute.ecr import ECR
 # from rixtribute.ssh import (
     # ssh as _ssh,
     # scp as _scp,
     # ssh_command as _ssh,
 import json
+from enum import Enum
 
 # For typing and auto-completion
 try:
@@ -17,6 +23,11 @@ try:
         from .configuration import ProfileParser
 except NameError as e:
     pass
+
+class IpProtocol(Enum):
+    TCP = 'tcp'
+    UDP = 'udp'
+    ICMP = 'icmp'
 
 class EC2Instance(object):
     def __init__(self, boto_instance_dict :dict):
@@ -121,9 +132,11 @@ class EC2Instance(object):
         return user
 
     def ssh(self):
-        key = None
+        # key = None
+        # key = "/home/jri/.ssh/jesper_ssh.pem"
+        key = config.get_ssh_key()["private_key"]
         user = self.get_username()
-        ssh.ssh(host=self.public_dns, user=user, port=self.ssh_port, key=key)
+        ssh.ssh(host=self.public_dns, user=user, port=self.ssh_port, key_str=key)
 
     def scp(self, source :str, dest: str, recursive :bool=False):
         key = None
@@ -460,7 +473,7 @@ class EC2(object):
         client = session.client("ec2")
 
         cfg = instance_cfg["config"]
-
+        region_name = aws_helper.strip_to_region(cfg['region'])
         instance_username = EC2.determine_ec2_user_from_image_id(cfg["ami"])
 
         # TODO: if no key then create a key and use it
@@ -470,19 +483,58 @@ class EC2(object):
         aws_secret_key = session.get_credentials().secret_key
         aws_default_region = session.region_name
 
-        encoded = EC2.encode_userdata(f"""#!/usr/bin/env bash
-        cat << EOF | su {instance_username}
-        echo "export TERM=xterm-256color" >> ~/.bashrc
-        echo "export AWS_ACCESS_KEY_ID={aws_access_key}" >> ~/.bashrc
-        echo "export AWS_SECRET_ACCESS_KEY={aws_secret_key}" >> ~/.bashrc
-        echo "export AWS_DEFAULT_REGION={aws_default_region}" >> ~/.bashrc
-mkdir ~/workdir
-echo "test" > ~/hello.txt
-EOF
-ln -s /home/{instance_username}/workdir /workdir""")
+        user_data = (
+            f"#!/usr/bin/env bash\n"
+            f'su - {instance_username} <<AAA\n'
+            f'echo "export TERM=xterm-256color" >> ~/.bashrc\n'
+            f'echo "source /home/{instance_username}/.profile" >> ~/.bashrc\n'
+            f'echo "export AWS_ACCESS_KEY_ID={aws_access_key}" >> ~/.profile\n'
+            f'echo "export AWS_SECRET_ACCESS_KEY={aws_secret_key}" >> ~/.profile\n'
+            f'echo "export AWS_DEFAULT_REGION={aws_default_region}" >> ~/.profile\n'
+            f'mkdir ~/workdir\n'
+            f'echo "test" > ~/hello.txt\n'
+            f'AAA\n'
+            f'source /home/{instance_username}/.profile\n'
+            f'ln -s /home/{instance_username}/workdir /workdir\n'
+        )
+        # user_data = f"""#!/usr/bin/env bash
+        # cat << EOF | su {instance_username}
+        # echo "export TERM=xterm-256color" >> ~/.bashrc
+        # echo "export AWS_ACCESS_KEY_ID={aws_access_key}" >> ~/.bashrc
+        # echo "export AWS_SECRET_ACCESS_KEY={aws_secret_key}" >> ~/.bashrc
+        # echo "export AWS_DEFAULT_REGION={aws_default_region}" >> ~/.bashrc
+# mkdir ~/workdir
+# echo "test" > ~/hello.txt
+# EOF
+# ln -s /home/{instance_username}/workdir /workdir"""
 
-        if not 'volumes' in cfg or len(cfg['volumes']) == 0:
-            cfg['volumes'] = [{'devname': '/dev/xvda', 'size': 50},]
+        # IF container then add it to userdata
+        container_name = instance_cfg.get('container', None)
+        if container_name:
+            container_cfg = config.get_container(container_name)
+            repo = ECR.get_repository(container_cfg['tag'], region_name=region_name)
+            if repo is not None:
+                user_data += (
+                    f'su - {instance_username} <<AAA\n'
+                    f'$(aws ecr get-login --no-include-email --region {region_name})\n'
+                    f'nvidia-docker pull {repo.repository_uri}:latest\n'
+                    f'echo "DOCKER_IMAGE=\"{repo.repository_uri}:latest\"" >> ~/.profile\n'
+                    f'source /home/{instance_username}/.profile\n'
+                    f'AAA\n'
+                )
+                # debug userdata: /var/log/cloud-init-output.log
+
+                # TODO set DEFAULT_DOCKER_IMAGE variable to docker image
+            __import__('pdb').set_trace()
+            # TODO ADD following to userdata:
+            #   $(aws ecr get-login --no-include-email --region <region>);
+            #   docker pull <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<image-name>:<optional-tag>;
+
+
+        encoded_user_data = EC2.encode_userdata(user_data)
+        security_group_id = EC2.get_or_create_security_group(instance_cfg["name"])
+        EC2.update_ingress_rules(security_group_id, cfg["ports"])
+        ssh_key_name = EC2.get_valid_key_pair_name()
 
 
         response = client.request_spot_instances(
@@ -490,7 +542,7 @@ ln -s /home/{instance_username}/workdir /workdir""")
             LaunchSpecification={
                 'ImageId': cfg['ami'],
                 'InstanceType': cfg['type'],
-                'KeyName': cfg['keyname'],
+                'KeyName': ssh_key_name,
                 'Placement': {
                     'AvailabilityZone': cfg['region'],
                 },
@@ -508,7 +560,7 @@ ln -s /home/{instance_username}/workdir /workdir""")
                       }
                     } for x in cfg['volumes']
                 ],
-                'UserData': encoded,
+                'UserData': encoded_user_data,
             },
             TagSpecifications=[
                 {'ResourceType': 'spot-instances-request',
@@ -571,6 +623,151 @@ ln -s /home/{instance_username}/workdir /workdir""")
                 'MaxAttempts': 100,
             }
         )
+
+    @staticmethod
+    def create_security_group(instance_name :str) -> str:
+        session = get_boto_session()
+        client = session.client("ec2")
+
+        # NOTE groupNames are prefixed with: "rxtb-"
+        response = client.create_security_group(
+            Description="Created from rxtb",
+            GroupName=f"rxtb-{instance_name}",
+            TagSpecifications=[
+                {'ResourceType': 'security-group',
+                 'Tags': generate_tags(instance_name),
+                },
+            ],
+        )
+
+        if response and response["ResponseMetadata"]["HTTPStatusCode"] != 200:
+            raise Exception(f"Error when trying to create a security_group")
+
+        group_id = response["GroupId"]
+        return group_id
+
+    @staticmethod
+    def get_or_create_security_group(instance_name :str) -> str:
+        session = get_boto_session()
+        client = session.client("ec2")
+
+        # NOTE groupNames are prefixed with: "rxtb-"
+        response = client.describe_security_groups(
+            Filters=[
+                {
+                    'Name': 'group-name',
+                    'Values': [
+                        f"rxtb-{instance_name}",
+                    ]
+                },
+            ]
+        )
+
+        if response and response["ResponseMetadata"]["HTTPStatusCode"] != 200:
+            raise Exception(f"Error when trying to create a security_group")
+
+        if len(response["SecurityGroups"]) <= 0:
+            print("Creating sg")
+            group_id = EC2.create_security_group(instance_name)
+        else:
+            group_id = response["SecurityGroups"][0]["GroupId"]
+
+        return group_id
+
+    @staticmethod
+    def update_ingress_rules(security_group_id :str, ports :List[dict]):
+        """Update ingress rules
+        Args:
+            security_group_id : security group id
+            ports             : list of ports in format: {"port": 22, "protocol": "tcp"}
+        Returns:
+            None
+        """
+        session = get_boto_session()
+        security_group = session.resource("ec2").SecurityGroup(security_group_id)
+
+        ports = copy.deepcopy(ports)
+
+        public_ip_range = get_external_ip() + "/32"
+
+        ip_permissions = security_group.ip_permissions
+
+        for port in ports:
+            match = False
+
+            for rule in ip_permissions:
+                for ip_range in rule["IpRanges"]:
+                    if ip_range["CidrIp"] == public_ip_range:
+                        ip_match = True
+
+                if port["port"] == rule["FromPort"] and rule["IpProtocol"] == port["protocol"]:
+                    match = True
+                else:
+                    match = False
+
+
+            if match == False:
+                print(f"adding ingress rule to security_group, port={port['port']}, protocol={port['protocol']}")
+                security_group.authorize_ingress(
+                    CidrIp=public_ip_range,
+                    ToPort=port["port"],
+                    FromPort=port["port"],
+                    IpProtocol=port["protocol"],
+                )
+
+    @staticmethod
+    def create_key_pair() -> Tuple[str, str]:
+        """Create an SSH key-pair
+        Args:
+            None
+        Returns:
+            (key name, fingerprint)
+        """
+        session = get_boto_session()
+        client = session.client("ec2")
+
+        project_name = config.project_name
+
+        response = client.create_key_pair(
+            KeyName=f"rxtb-{project_name}",
+            TagSpecifications=[
+                {'ResourceType': 'key-pair',
+                 'Tags': generate_tags(project_name),
+                },
+            ],
+        )
+
+        if response and response["ResponseMetadata"]["HTTPStatusCode"] != 200:
+            raise Exception(f"Error when trying to create a security_group")
+
+        return (response["KeyName"], response["KeyMaterial"])
+
+    @staticmethod
+    def verify_key_pair_name(key_name :str) -> bool:
+        session = get_boto_session()
+        client = session.client("ec2")
+
+        try:
+            response = client.describe_key_pairs(
+                KeyNames=[key_name],
+            )
+            if response and response["ResponseMetadata"]["HTTPStatusCode"] != 200:
+                raise Exception(f"Error when trying to describe_key_pairs")
+        except botocore.exceptions.ClientError as e:
+            return False
+        return True
+
+    @staticmethod
+    def get_valid_key_pair_name() -> str:
+        # load existing key if any
+        ssh_key_name = config.get_ssh_key().get("key_name", None)
+        if ssh_key_name == None or EC2.verify_key_pair_name(ssh_key_name) == False:
+            key_name, private_key = EC2.create_key_pair()
+            config.add_ssh_key(key_name, private_key)
+            ssh_key_name = key_name
+
+        return ssh_key_name
+
 
 
 """
