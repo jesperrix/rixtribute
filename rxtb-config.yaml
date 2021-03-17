@@ -17,8 +17,17 @@ project:
 
 container:
   - name: pytorch-training
+    path: .
     file: rixtribute/example-gpu.DockerFile
-    ports: [5000]
+    ports:
+      - containerPort: 5000
+        hostPort: 5000
+  - name: nginx-test
+    path: .
+    file: rixtribute/example-nginx.DockerFile
+    ports:
+      - containerPort: 80
+        hostPort: 8080
 
 instance:
   - name: gpu-iptc
@@ -34,8 +43,32 @@ instance:
       volumes:
         - devname: /dev/xvda
           size: 50
+  - name: amazon-linux-2-dlami
+    provider: aws
+    container: pytorch-training
+    config: 
+      region: eu-west-1a
+      type: p2.xlarge
+      ami: ami-037ae87a2e8684759
+      spot: true
+      volumes:
+        - devname: /dev/xvda
+          size: 100
+  - name: test-nginx
+    provider: aws
+    container: nginx-test
+    config: 
+      region: eu-west-1a
+      type: m5.large
+      ami: ami-037ae87a2e8684759
+      spot: true
+      ports: ["tcp:22", "tcp:80"]
+      volumes:
+        - devname: /dev/xvda
+          size: 100
   - name: test-iptc
     provider: aws
+    container: pytorch-training
     config: 
       region: eu-west-1a
       type: m5.large
@@ -45,3 +78,15 @@ instance:
       volumes:
         - devname: /dev/xvda
           size: 100
+
+commands:
+    train: |
+        [[ -e /.dockerenv ]] && echo "inside docker"
+        for (( i = 0; i < 3; i++ )); do
+          echo "training epoch #$i"
+          sleep 1
+        done
+        echo "finished training.."
+    tensorboard: |
+        tensorboard --bind_all --port 6006 --logdir /workspace/project/training
+

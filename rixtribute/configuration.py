@@ -54,6 +54,10 @@ class ProfileParser():
         return True
 
     @property
+    def file_path(self):
+        return self._file_path_absolute
+
+    @property
     def name(self):
         try:
             return self._raw_profile["name"]
@@ -101,12 +105,21 @@ class ConfigParser(object):
         self._provider = self._parse_provider()
         self._containers = self._parse_containers()
         self._instances = self._parse_instances()
+        self._commands = self._parse_commands()
 
         # TODO parse project
 
     @property
     def project_name(self):
         return self.get_project()['name']
+
+    @property
+    def file_path(self):
+        return self._config_file_path_absolute
+
+    @property
+    def project_root(self):
+        return self._dir_absolute
 
     def verify_config(self):
         self.get_instances()
@@ -209,16 +222,27 @@ class ConfigParser(object):
             tmp_container["file"] = os.path.join(self._dir_absolute, raw_container["file"])
             tmp_container["ports"] = []
 
+            path = os.path.join(self._dir_absolute, raw_container.get("path", ""))
+            if not os.path.isdir(path):
+                raise Exception("invalid container build path: {path} in {tmp_container['name']} in rxtb-config.yaml")
+            tmp_container["path"] = path
+
             ports = raw_container.get("ports", None)
             if ports:
-                for port in ports:
-                    if type(port) != int:
-                        raise Exception((
-                            f"Wrong type in container ports {port} for \"{raw_container['name']}\", "
-                            f"expected {int}")
-                        )
-                    tmp_container["ports"].append(port)
+                for port_spec in ports:
+                    names = ["containerPort", "hostPort"]
+                    for k in names:
+                        if k not in port_spec:
+                            raise Exception("Needs {' and '.join(names)} in ports section for \"{raw_container['name']}\"")
 
+                        port = port_spec[k]
+                        if type(port) != int:
+                            raise Exception((
+                                f"Wrong type in container ports {type(port)} for \"{raw_container['name']}\", "
+                                f"expected {int}")
+                            )
+
+                    tmp_container["ports"].append(port_spec)
 
             if os.path.isfile(tmp_container["file"]) == False:
                 raise Exception((
@@ -263,7 +287,6 @@ class ConfigParser(object):
             tmp_instance["provider"] = raw_instance["provider"]
 
             if "container" in raw_instance:
-                print("container is present")
                 try:
                     self.get_container(raw_instance["container"])
                 except:
@@ -364,6 +387,26 @@ class ConfigParser(object):
                 return copy.deepcopy(instance)
 
         raise Exception(f"No instance called '{instance_name}', add to the instance section")
+
+    # command section
+
+    def _parse_commands(self) -> dict:
+        if 'commands' not in self._raw_config:
+            return {}
+            # raise Exception("No provider section in rxtb-config.yaml")
+
+        raw_commands = copy.deepcopy(self._raw_config['commands'])
+        return raw_commands
+
+    def get_commands(self):
+        return list(copy.deepcopy(self._commands).keys())
+
+    def get_command(self, name :str) -> Optional[str]:
+        commands = copy.deepcopy(self._commands)
+        try:
+            return commands[name]
+        except Exception as e:
+            return None
 
 try:
     config = ConfigParser()
