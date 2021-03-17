@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 from typing import List, Optional
 import tempfile
@@ -64,12 +65,12 @@ def generate_ssh_command(host :str,
     cmd = cmd + [f'{user}@{host}']
 
     if command:
-        cmd.append(command)
+        cmd.append(f"'{command}'")
 
     return cmd
 
 
-def attach_tmux_session_and_run_command(session_name :str, command :str):
+def attach_tmux_session_and_run_command(session_name :str, command :str) -> str:
     # -s = session name, -n = window name
     tmux_init_cmd = f'tmux new-session -d -s {session_name} -n main'
     # tmux select-window -t "$SESSION":model \;
@@ -82,7 +83,7 @@ def attach_tmux_session_and_run_command(session_name :str, command :str):
     )
 
     tmux_run_command = (
-        f'tmux send-keys -t "{session_name}":main "{command}" Enter \; '
+        f'tmux send-keys -t "{session_name}":main \"{command}\" Enter \; '
     )
 
     tmux_attach_cmd = f"tmux attach-session -t {session_name}"
@@ -95,18 +96,24 @@ def ssh_command_tmux(host :str,
                      user :str,
                      command :str,
                      port :int=22,
-                     key :str=None):
-    # tmux_attach_cmd = attach_tmux_session("automated-session")
-    # remote_cmd = f'{tmux_attach_cmd} && {command}'
+                     key_path :str=None,
+                     key_str :str=None):
 
     remote_cmd = attach_tmux_session_and_run_command("automated-session", command)
+
+    if key_str != None:
+        f = tempfile.NamedTemporaryFile(suffix='_temp', prefix='rxtb_', delete=True)
+        f.write(key_str.encode("utf8"))
+        f.flush()
+        key_path = f.name
+
     cmd = generate_ssh_command(host=host,
                                user=user,
                                port=port,
-                               key_path=key,
+                               key_path=key_path,
                                skip_host_check=True,
-                               command=command)
-    subprocess.call(cmd)
+                               command=remote_cmd)
+    subprocess.call(" ".join(cmd), shell=True)
 
 
 def ssh_command(host :str,
@@ -115,17 +122,12 @@ def ssh_command(host :str,
                 port :int=22,
                 key :str=None,
                 print_output :bool=False):
-    # cmd = ssh_command(host, user, port, key, command)
-    # subprocess.call(cmd)
     cmd = generate_ssh_command(host=host,
                                user=user,
                                port=port,
                                key_path=key,
                                skip_host_check=True,
                                command=command)
-
-    # output = subprocess.check_output(cmd)
-    # print(output)
 
     cmd_str = ' '.join(cmd)
 
@@ -140,15 +142,23 @@ def ssh_command(host :str,
 
 def scp(source :List[str],
         dest :str,
-        recursive :bool,
+        recursive :bool=False,
         port :int=22,
-        key :str=None) -> bool:
+        key_path :str=None,
+        key_str :str=None) -> bool:
+
+    if key_str != None:
+        f = tempfile.NamedTemporaryFile(suffix='_temp', prefix='rxtb_', delete=True)
+        f.write(key_str.encode("utf8"))
+        f.flush()
+        key_path = f.name
+
     # Generate scp command
     cmd = generate_scp_command(source_files=source,
                       destination=dest,
                       recursive=recursive,
                       port=port,
-                      key_path=key,
+                      key_path=key_path,
                       skip_host_check=True)
 
     cmd_str = ' '.join(cmd)
