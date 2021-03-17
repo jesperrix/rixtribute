@@ -2,6 +2,7 @@ from rixtribute.helper import get_boto_session, generate_tags
 from rixtribute.configuration import config
 from rixtribute import aws_helper
 from typing import List, Optional
+from botocore import errorfactory
 import base64
 
 class ECRRepo(object):
@@ -108,6 +109,15 @@ class ECR(object):
                 repositories.append(ECRRepo(repo))
 
         return repositories
+
+    @classmethod
+    def get_or_create_repository(cls, name :str) -> Optional[ECRRepo]:
+        try:
+            repo = cls.get_repository(name)
+        except:
+            repo = ECR.create_repository(name)
+
+        return repo
 
     @classmethod
     def create_repository(cls, name :str, region_name :str=None):
