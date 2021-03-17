@@ -15,8 +15,8 @@ def init(ctx):
     """Initialize project and setup prerequisite infrastructure """
 
     print("Initializing project")
-    print(f"config file: {config.file_path_absolute}")
-    print(f"profile file: {profile.file_path_absolute}")
+    print(f"config file: {config.file_path}")
+    print(f"profile file: {profile.file_path}")
 
     cfg_instances = config.get_instances()
     cfg_containers = config.get_containers()
