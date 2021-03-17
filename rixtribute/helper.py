@@ -2,6 +2,7 @@ import boto3
 import urllib.request
 from .configuration import config, profile
 from typing import List
+import uuid
 
 def get_boto_session(region_name :str=None):
     provider = config.get_provider()
@@ -31,6 +32,9 @@ def generate_tags(name :str):
             {'Key': 'origin-email', 'Value': profile.email},
             {'Key': 'origin-name', 'Value': profile.name}]
 
+def get_uuid_part_str() -> str:
+    return str(uuid.uuid1()).split("-")[0]
+
 def filter_list_of_dicts(l : List[dict], keys :list) -> List[dict]:
     """Filter dict keys in list of dictionaries.
     Args:
@@ -51,7 +55,7 @@ def print_process():
         sys.stdout.flush()
 
 def get_external_ip() -> str:
-    resp = urllib.request.urlopen('https://api.ipify.org')
+    resp = urllib.request.urlopen('http://checkip.amazonaws.com/')
     if resp.status != 200:
         return ''
-    return resp.read().decode("utf8")
+    return resp.read().decode("utf8").strip()
