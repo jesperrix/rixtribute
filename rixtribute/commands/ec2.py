@@ -60,9 +60,7 @@ def start(ctx):
         container_utils.docker_build_from_cfg(container_cfg)
 
         # Get or Create repo
-        repo = ECR.get_repository(container_cfg['tag'])
-        if repo is None:
-            repo = ECR.create_repository(container_cfg['tag'])
+        repo = ECR.get_or_create_repository(container_cfg['tag'])
 
         # Get docker image
         docker_image = container_utils.docker_image_get(f"{container_cfg['tag']}:latest")
@@ -114,15 +112,7 @@ def ssh(ctx):
 
     ec2_instances[n].ssh()
 
-    # host = ec2_instances[n].public_dns
-    # port = 22
-    # user = EC2.determine_ec2_user_from_image_id(ec2_instances[n].image_id)
 
-    # # host = "ec2-52-214-34-243.eu-west-1.compute.amazonaws.com"
-    # # connect(host, user, 22, '/home/jri/.ssh/jesper_ssh.pem')
-    # # __import__('pdb').set_trace()
-    # connect(host, user)
-    # pass
 
 @ec2.command(short_help="List available regions")
 @click.pass_context
