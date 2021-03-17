@@ -4,6 +4,7 @@ from rixtribute.commands.ec2 import ec2 as ec2_commands
 from rixtribute.commands.ecr import ecr as ecr_commands
 from rixtribute.commands.container import container as container_commands
 from rixtribute.commands.init import init as init_commands
+from rixtribute.commands.run import run as run_commands
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
@@ -32,3 +33,4 @@ main.add_command(ec2_commands)
 main.add_command(ecr_commands)
 main.add_command(container_commands)
 main.add_command(init_commands)
+main.add_command(run_commands)
