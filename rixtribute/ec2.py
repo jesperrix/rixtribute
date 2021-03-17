@@ -1,8 +1,9 @@
 import datetime
+import tempfile
 import copy
 import boto3
 import botocore
-from rixtribute.helper import get_boto_session, generate_tags, get_external_ip
+from rixtribute.helper import get_boto_session, generate_tags, get_external_ip, get_uuid_part_str
 from rixtribute import aws_helper
 import base64
 import os
@@ -138,17 +139,45 @@ class EC2Instance(object):
         user = self.get_username()
         ssh.ssh(host=self.public_dns, user=user, port=self.ssh_port, key_str=key)
 
-    def scp(self, source :str, dest: str, recursive :bool=False):
-        key = None
-        success = ssh.scp(source=[source],
+    def docker_run(self, cmd :str=None):
+        key = config.get_ssh_key()["private_key"]
+        user = self.get_username()
+        docker_gpu = '$(nvidia-smi --list-gpus > /dev/null && echo "--gpus=all")'
+        if cmd != None:
+            f = tempfile.NamedTemporaryFile(suffix='_temp', prefix='rxtb_', delete=True)
+            f.write(f"#!/bin/sh\n".encode("utf8"))
+            f.write(cmd.encode("utf8"))
+            f.flush()
+            cmd_file_abs_path = f.name
+            cmd_file_name = os.path.basename(cmd_file_abs_path)
+
+            # SCP the command file
+            self.copy_files_to_tmp([cmd_file_abs_path])
+
+            cmd_str = (
+                f'docker run --rm -v /tmp/{cmd_file_name}:/cmd.sh --entrypoint="" {docker_gpu} $DOCKER_IMAGE bash '
+                f"/cmd.sh"
+            )
+        else:
+            cmd_str = "docker run --rm "+docker_gpu+" $DOCKER_IMAGE"
+
+        # cmd = "docker run --gpus=all $DOCKER_IMAGE"
+        ssh.ssh_command_tmux(host=self.public_dns, command=cmd_str, user=user, port=self.ssh_port, key_str=key)
+
+    def copy_files_to_tmp(self, files :List[str], recursive :bool=False):
+        key = config.get_ssh_key()["private_key"]
+        user = self.get_username()
+        dest = f"{user}@{self.public_dns}:/tmp/"
+
+        success = ssh.scp(source=files,
                           dest=dest,
                           recursive=recursive,
                           port=self.ssh_port,
-                          key=key)
+                          key_str=key)
         return success
 
-    def copy_files_to_workdir(self, files :List[str], recursive :bool):
-        key = None
+    def copy_files_to_workdir(self, files :List[str], recursive :bool=False):
+        key = config.get_ssh_key()["private_key"]
         user = self.get_username()
         dest = f"{user}@{self.public_dns}:{self.workdir}"
 
@@ -156,11 +185,12 @@ class EC2Instance(object):
                           dest=dest,
                           recursive=recursive,
                           port=self.ssh_port,
-                          key=key)
+                          key_str=key)
         return success
 
     def copy_files_from_workdir(self, source :List[str], recursive :bool, dest :str='.'):
         """ Copy files from the instance workdir """
+        key = config.get_ssh_key()["private_key"]
         key = None
         user = self.get_username()
         source_prefix = f"{user}@{self.public_dns}:"
@@ -172,7 +202,8 @@ class EC2Instance(object):
                           dest=dest,
                           recursive=recursive,
                           port=self.ssh_port,
-                          key=key)
+                          key_str=key)
+        return success
 
 
     def list_files(self):
@@ -226,7 +257,7 @@ class EC2(object):
         # Ubuntu       # ubuntu
         # CentOS       # centos
         #####################################
-        if 'amazon linux' in image_name.lower():
+        if 'amazon linux' in image_name.lower() or 'amzn2-ami' in image_name.lower():
             return "ec2-user"
         if 'centos' in image_name.lower():
             return "centos"
@@ -491,22 +522,12 @@ class EC2(object):
             f'echo "export AWS_ACCESS_KEY_ID={aws_access_key}" >> ~/.profile\n'
             f'echo "export AWS_SECRET_ACCESS_KEY={aws_secret_key}" >> ~/.profile\n'
             f'echo "export AWS_DEFAULT_REGION={aws_default_region}" >> ~/.profile\n'
+            f'echo "set-option -g allow-rename off" > ~/.tmux.conf\n'
             f'mkdir ~/workdir\n'
-            f'echo "test" > ~/hello.txt\n'
             f'AAA\n'
             f'source /home/{instance_username}/.profile\n'
             f'ln -s /home/{instance_username}/workdir /workdir\n'
         )
-        # user_data = f"""#!/usr/bin/env bash
-        # cat << EOF | su {instance_username}
-        # echo "export TERM=xterm-256color" >> ~/.bashrc
-        # echo "export AWS_ACCESS_KEY_ID={aws_access_key}" >> ~/.bashrc
-        # echo "export AWS_SECRET_ACCESS_KEY={aws_secret_key}" >> ~/.bashrc
-        # echo "export AWS_DEFAULT_REGION={aws_default_region}" >> ~/.bashrc
-# mkdir ~/workdir
-# echo "test" > ~/hello.txt
-# EOF
-# ln -s /home/{instance_username}/workdir /workdir"""
 
         # IF container then add it to userdata
         container_name = instance_cfg.get('container', None)
@@ -516,20 +537,12 @@ class EC2(object):
             if repo is not None:
                 user_data += (
                     f'su - {instance_username} <<AAA\n'
-                    f'$(aws ecr get-login --no-include-email --region {region_name})\n'
-                    f'nvidia-docker pull {repo.repository_uri}:latest\n'
                     f'echo "DOCKER_IMAGE=\"{repo.repository_uri}:latest\"" >> ~/.profile\n'
+                    f'$(aws ecr get-login --no-include-email --region {region_name})\n'
+                    f'docker pull {repo.repository_uri}:latest\n'
                     f'source /home/{instance_username}/.profile\n'
                     f'AAA\n'
                 )
-                # debug userdata: /var/log/cloud-init-output.log
-
-                # TODO set DEFAULT_DOCKER_IMAGE variable to docker image
-            __import__('pdb').set_trace()
-            # TODO ADD following to userdata:
-            #   $(aws ecr get-login --no-include-email --region <region>);
-            #   docker pull <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<image-name>:<optional-tag>;
-
 
         encoded_user_data = EC2.encode_userdata(user_data)
         security_group_id = EC2.get_or_create_security_group(instance_cfg["name"])
@@ -537,6 +550,7 @@ class EC2(object):
         ssh_key_name = EC2.get_valid_key_pair_name()
 
 
+        name = instance_cfg["name"] + "-" + get_uuid_part_str()
         response = client.request_spot_instances(
             InstanceCount=1,
             LaunchSpecification={
@@ -550,7 +564,7 @@ class EC2(object):
                     # 'Enabled': True,
                 # },
                 'SecurityGroupIds': [
-                    'sg-090c41c001c202249',
+                    security_group_id,
                 ],
                 'BlockDeviceMappings': [
                     {'DeviceName': x['devname'],
@@ -564,7 +578,7 @@ class EC2(object):
             },
             TagSpecifications=[
                 {'ResourceType': 'spot-instances-request',
-                 'Tags': generate_tags(instance_cfg['name']),
+                 'Tags': generate_tags(name),
                 },
             ],
             Type='persistent',
@@ -587,7 +601,7 @@ class EC2(object):
 
         response = client.create_tags(
             Resources=[instance_id,],
-            Tags=generate_tags(instance_cfg['name']),
+            Tags=generate_tags(name),
         )
 
         if response and response["ResponseMetadata"]["HTTPStatusCode"] != 200:
@@ -729,7 +743,7 @@ class EC2(object):
         project_name = config.project_name
 
         response = client.create_key_pair(
-            KeyName=f"rxtb-{project_name}",
+            KeyName=f"rxtb-{get_uuid_part_str()}",
             TagSpecifications=[
                 {'ResourceType': 'key-pair',
                  'Tags': generate_tags(project_name),
